@@ -1,6 +1,8 @@
 name: Sync mirror from mjirgensons.github.io
-# Parallel mirror of the book site. Copies docs/ from the public main repo every hour.
-# Canonical tags still point to https://mjirgensons.github.io/, so search engines treat that as the original.
+# sundeco.ca mirror. Builds from the public main repo every hour:
+#   /                   author page (Martin Jirgenson, list of books)
+#   /steer-dont-guess/  the book site
+# Canonical tags still point to https://mjirgensons.github.io/ while that is the main site.
 on:
   schedule:
     - cron: "17 * * * *"
@@ -12,11 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Copy docs from main site
+      - name: Build mirror from main site
         run: |
           git clone --depth 1 https://github.com/mjirgensons/mjirgensons.github.io /tmp/main
-          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github ! -name CNAME ! -name .nojekyll ! -name README.md -exec rm -rf {} +
-          cp -r /tmp/main/docs/. .
+          python3 /tmp/main/tools/build_mirror.py /tmp/out
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github ! -name README.md -exec rm -rf {} +
+          cp -r /tmp/out/. .
           echo "sundeco.ca" > CNAME
           touch .nojekyll
       - name: Commit if changed
