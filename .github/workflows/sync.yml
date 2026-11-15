@@ -2,7 +2,8 @@ name: Sync mirror from mjirgensons.github.io
 # sundeco.ca mirror. Builds from the public main repo every hour:
 #   /                   author page (Martin Jirgenson, list of books)
 #   /steer-dont-guess/  the book site
-# Canonical tags still point to https://mjirgensons.github.io/ while that is the main site.
+# Since 2026-11-15 sundeco.ca/steer-dont-guess/ is the MAIN site (canonical, sitemap); mjirgensons.github.io is the mirror.
+# After a sync that changed pages, the changed URLs are sent to IndexNow (Bing, Yandex, Seznam, Naver).
 on:
   schedule:
     - cron: "17 * * * *"
@@ -14,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Build mirror from main site
         run: |
           git clone --depth 1 https://github.com/mjirgensons/mjirgensons.github.io /tmp/main
@@ -27,4 +30,35 @@ jobs:
           git config user.name "mirror-bot"
           git config user.email "mirror-bot@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || (git commit -m "Sync from mjirgensons.github.io" && git push)
+          git diff --cached --quiet || (git commit -m "Sync from mjirgensons.github.io" && git push && echo "changed=1" >> "$GITHUB_ENV")
+      - name: Wait for Pages deploy
+        if: env.changed == '1'
+        run: sleep 90
+      - name: Send changed URLs to IndexNow
+        if: env.changed == '1'
+        run: |
+          python3 - <<'PY'
+          import json, re, subprocess, urllib.request
+          key = "3f5573082a047d7fd044b24d1fd40f67"
+          site = "https://sundeco.ca/"
+          sitemap = set(re.findall(r"<loc>([^<]+)</loc>", open("steer-dont-guess/sitemap.xml").read()))
+          diff = subprocess.run(["git", "diff", "--name-only", "HEAD~1", "HEAD"], capture_output=True, text=True)
+          urls = set()
+          for f in diff.stdout.split():
+              if f.endswith("index.html"):
+                  u = site + f[:-len("index.html")]
+                  if u in sitemap:
+                      urls.add(u)
+          urls = sorted(urls)
+          if not urls:
+              print("IndexNow: no changed pages, nothing sent")
+              raise SystemExit(0)
+          body = json.dumps({"host": "sundeco.ca", "key": key, "keyLocation": f"{site}{key}.txt", "urlList": urls[:10000]}).encode()
+          req = urllib.request.Request("https://api.indexnow.org/indexnow", data=body,
+                                       headers={"Content-Type": "application/json; charset=utf-8"})
+          try:
+              with urllib.request.urlopen(req) as r:
+                  print("IndexNow", r.status, len(urls), "URLs:", " ".join(urls[:20]))
+          except Exception as e:
+              print("IndexNow failed (not fatal):", e)
+          PY
